@@ -32,8 +32,12 @@ Tools: `kubectl top/logs/describe`, `exec`, APM dashboards.
 Mitigation: scale out/restart pods; follow-up: add latency alerts.
 Autoscaling: HPA (replicas), VPA (pod sizing), both metrics-driven.
 
-## What I'd Improve
-Move to AWS EKS; remote state + locking. Gateway API over ingress-nginx; Route53 + ALB for prod. Karpenter; Kyverno for policy.
+## ToDo:
+1. Move to AWS EKS; 
+2. remote state + locking. 
+3. Gateway API over ingress-nginx; 
+4. Route53 + ALB for prod. 
+5. Add Karpenter for scaling and Kyverno for policy.
 
 ## Decisions & Trade-offs
 minikube/kind fits the 3-hour budget; same module targets EKS later.
@@ -43,7 +47,7 @@ Staging stays single-region day-to-day (cost); periodic multi-region failover
 drills catch region-specific issues before they reach Prod.
 
 ## Production Architecture (30 services, 500rps, 99.9%, sensitive data)
-![Architecture](docs/architecture.svg)
+![Architecture](docs/prod_architecture.svg)
 - Route53 (weighted/latency routing) across regional ALBs, each fronting a multi-AZ EKS node group
 - Pod affinity/anti-affinity + topology spread across AZs; taints isolate critical workloads
 - Rolling updates (`maxUnavailable=0`, `maxSurge=1`) for zero-downtime deploys
