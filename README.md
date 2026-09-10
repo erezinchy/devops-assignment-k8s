@@ -1,38 +1,60 @@
 # Senior DevOps Engineer — Home Assignment
 
 ## Prerequisites
-- Docker Desktop running (minikube --driver=docker requires it)
-- minikube, kubectl, terraform installed | Windows (PowerShell/cmd)
+Docker Desktop running | minikube, kubectl, terraform | Windows
 
 ## Deployment
-
 1. `minikube start --cpus=2 --memory=4096 --driver=docker`
 2. `minikube addons enable ingress`
 3. `kubectl config use-context minikube`
 4. `git clone <repo_path>` && `cd infra/env/dev`
-5. `terraform init` → `terraform plan` → `terraform apply -auto-approve`
-6. `kubectl get pods -n demo-dev` — sanity check: pods should be Running/Ready
-7. `kubectl get svc,ingress -n demo-dev` — sanity check: confirm Service + Ingress were created
+5. `terraform init` → `plan` → `apply -auto-approve`
+6. `kubectl get pods -n demo-dev` — sanity check
+7. `kubectl get svc,ingress -n demo-dev` — confirm creation
 
 **Expose locally:**
-
-8. Open a new terminal and run `minikube tunnel` — keep it open
-9. Edit hosts file (as Admin) `C:\Windows\System32\drivers\etc\hosts`: `127.0.0.1 demo.local`
+8. `minikube tunnel` — keep open
+9. Hosts file (Admin): `127.0.0.1 demo.local`
 10. Verify: `curl http://demo.local`
 
 ## CI/CD
-- GitHub Actions runs on push/PR to `main`
-- Validates + applies Terraform against an ephemeral **kind** cluster (CI) vs. **minikube** (local dev) — same manifests, different local K8s distro
-- Rollback: `kubectl rollout undo deployment/demo-app -n demo-dev`
+GitHub Actions on push/PR to `main`; applies against ephemeral **kind** (CI) vs **minikube** (local).
+Rollback: `kubectl rollout undo deployment/demo-app -n demo-dev`
 
-## What I'd improve with more time
-1. Move to AWS EKS
-2. Add remote state + state locking (S3 + DynamoDB)
-3. Replace ingress-nginx with Gateway API
-4. For prod, use Route53 instead of manual hosts-file edits
-5. For prod, use ALB instead of `minikube tunnel`
+## Security
+No secrets committed; prod uses Secrets Manager/OIDC, per-service SA.
+Risks: secret sprawl, no TLS (prod: ALB), unpinned image (prod: SHA-256 pin + scan).
+
+## Observability & Troubleshooting
+Stack: Prometheus/Grafana (metrics), ELK (logs); CloudWatch/Datadog as prod alternatives.
+Scenario (CPU 35%, no deploys, latency 200ms→5s): compute is healthy, so check deps first, then network/DNS, pools, noisy neighbors.
+Tools: `kubectl top/logs/describe`, `exec`, APM dashboards.
+Mitigation: scale out/restart pods; follow-up: add latency alerts.
+Autoscaling: HPA (replicas), VPA (pod sizing), both metrics-driven.
+
+## ToDo:
+1. Move to AWS EKS; 
+2. remote state + locking. 
+3. Gateway API over ingress-nginx; 
+4. Route53 + ALB for prod. 
+5. Add Karpenter for scaling and Kyverno for policy.
 
 ## Decisions & Trade-offs
-- **Local K8s over cloud**: chose minikube/kind over a real cloud cluster to stay within the 3-hour budget — no IAM/VPC setup overhead. Same Terraform module would target EKS (or AKS) with only the environment layer changing.
-- **minikube (dev) vs kind (CI)**: both are disposable local K8s; kind is faster to provision in GitHub-hosted runners. Manifests are identical.
-- **Terraform module split**: `modules/app` is reusable/env-agnostic; `env/dev` holds only environment-specific values — this separation is intended to carry directly to staging/prod.
+minikube/kind fits the 3-hour budget; same module targets EKS later.
+minikube (dev) vs kind (CI): both disposable; kind is faster in CI.
+`modules/app` is reusable; `env/dev` holds only environment-specific values.
+Staging stays single-region day-to-day (cost); periodic multi-region failover
+drills catch region-specific issues before they reach Prod.
+
+## Production Architecture (30 services, 500rps, 99.9%, sensitive data)
+![Architecture](docs/prod_architecture.svg)
+- Route53 (weighted/latency routing) across regional ALBs, each fronting a multi-AZ EKS node group
+- Pod affinity/anti-affinity + topology spread across AZs; taints isolate critical workloads
+- Rolling updates (`maxUnavailable=0`, `maxSurge=1`) for zero-downtime deploys
+- Managed data layer: RDS Postgres Multi-AZ, ElastiCache Redis, Amazon MQ (RabbitMQ)
+- KEDA for RabbitMQ queue-depth scaling, alongside HPA/VPA for CPU/memory
+- Namespace-per-team; namespace- or cluster-per-customer where regulation requires stricter isolation
+- Diagram = **Production** only; Dev/Staging run single-region, no HA needed
+
+## AI Tool Usage
+Claude helped draft Terraform structure, the CI workflow, and README sections; code was run and verified locally.
